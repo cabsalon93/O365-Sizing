@@ -1,0 +1,464 @@
+# HYCU for Microsoft 365 - Outil d'Évaluation de Dimensionnement
+
+[![Version](https://img.shields.io/badge/version-4.4--HYCU-blue.svg)](https://github.com)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/powershell/)
+[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
+
+## 📋 Vue d'ensemble
+
+Cet outil PowerShell analyse votre environnement Microsoft 365 pour fournir des informations précises de dimensionnement pour la planification de sauvegarde et de récupération avec **HYCU**. Il génère un rapport HTML professionnel avec des statistiques d'utilisation pour Exchange Online, OneDrive for Business et SharePoint Online.
+
+### 🎯 Objectifs
+
+- **Évaluer** l'utilisation actuelle de votre environnement M365
+- **Calculer** les besoins de stockage pour les sauvegardes HYCU
+- **Prévoir** la croissance annuelle des données
+- **Planifier** le dimensionnement de votre solution HYCU
+
+---
+
+## ✨ Fonctionnalités
+
+### 📊 Collecte de données
+- ✅ **Exchange Online** : Boîtes aux lettres utilisateurs et partagées
+- ✅ **OneDrive for Business** : Stockage personnel des utilisateurs
+- ✅ **SharePoint Online** : Sites d'équipe et de communication
+- ✅ **Boîtes d'archivage** : Support optionnel (paramètre)
+- ✅ **Filtrage par groupe** : Analyse ciblée sur un groupe Azure AD
+
+### 📈 Analyse avancée
+- Calcul du stockage total par service
+- Moyenne de stockage par utilisateur/site
+- Tendances de croissance annuelle (basées sur 180 jours)
+- Identification automatique des boîtes partagées
+
+### 🎨 Rapport HTML professionnel
+- Design moderne inspiré de HYCU.com
+- Interface responsive (desktop/mobile/tablette)
+- Visualisation claire avec cartes métriques
+- Graphiques de croissance avec badges
+- Export et impression optimisés
+- Branding HYCU complet
+
+---
+
+## 📋 Prérequis
+
+### 🔧 Configuration système requise
+
+| Composant | Requis |
+|-----------|--------|
+| **Système d'exploitation** | Windows 10/11, Windows Server 2016+ |
+| **PowerShell** | Version 5.1 ou supérieure |
+| **Modules PowerShell** | Microsoft.Graph.Reports<br/>ExchangeOnlineManagement |
+| **Connectivité** | Accès Internet pour Microsoft 365 |
+
+### 👤 Permissions requises
+
+#### Permissions Microsoft Graph API
+- `Reports.Read.All` - **Requis**
+- `Group.Read.All` - Optionnel (pour filtrage par groupe)
+- `GroupMember.Read.All` - Optionnel (pour filtrage par groupe)
+- `User.Read.All` - Optionnel (pour filtrage par groupe)
+
+#### Rôles administratifs
+- **Reports Reader** - Minimum requis
+- **Global Reader** - Recommandé pour accès complet
+- **Exchange Administrator** - Requis si analyse des boîtes d'archivage
+
+---
+
+## 🚀 Installation
+
+### Étape 1 : Installer les modules PowerShell
+
+Ouvrez PowerShell en tant qu'administrateur et exécutez :
+
+```powershell
+# Installer le module Microsoft Graph Reports
+Install-Module Microsoft.Graph.Reports -Scope CurrentUser -Force
+
+# Installer le module Exchange Online Management
+Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
+
+# Vérifier l'installation
+Get-Module -ListAvailable -Name Microsoft.Graph.Reports, ExchangeOnlineManagement
+```
+
+### Étape 2 : Télécharger le script
+
+Téléchargez le fichier `Get-M365SizingInfo-HYCU.ps1` dans un répertoire de votre choix.
+
+### Étape 3 : Configurer la politique d'exécution (si nécessaire)
+
+```powershell
+# Vérifier la politique actuelle
+Get-ExecutionPolicy
+
+# Si "Restricted", modifier la politique
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+---
+
+## 💻 Utilisation
+
+### 📌 Syntaxe de base
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1 [-AzureAdGroupName <string>] [-SkipArchiveMailbox <bool>] [-EnableDebug <bool>] [-OutputObject]
+```
+
+### 🎯 Exemples d'utilisation
+
+#### Exemple 1 : Analyse complète de l'environnement
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1
+```
+
+**Résultat** : Analyse tous les utilisateurs et génère le rapport complet.
+
+---
+
+#### Exemple 2 : Analyse d'un groupe spécifique
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1 -AzureAdGroupName "Département Marketing"
+```
+
+**Résultat** : Analyse uniquement les membres du groupe "Département Marketing".
+
+---
+
+#### Exemple 3 : Inclure les boîtes d'archivage
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1 -SkipArchiveMailbox $false
+```
+
+**Résultat** : Inclut l'analyse des boîtes aux lettres d'archivage (peut être long).
+
+---
+
+#### Exemple 4 : Mode débogage
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1 -EnableDebug $true
+```
+
+**Résultat** : Affiche des logs détaillés pour le dépannage.
+
+---
+
+#### Exemple 5 : Export des données en objet PowerShell
+
+```powershell
+$sizingData = .\Get-M365SizingInfo-HYCU.ps1 -OutputObject
+$sizingData.Exchange
+$sizingData.OneDrive
+$sizingData.SharePoint
+```
+
+**Résultat** : Retourne les données sous forme d'objet pour traitement ultérieur.
+
+---
+
+### ⚙️ Paramètres détaillés
+
+| Paramètre | Type | Défaut | Description |
+|-----------|------|--------|-------------|
+| `-AzureAdGroupName` | String | - | Nom du groupe Azure AD pour filtrer l'analyse |
+| `-SkipArchiveMailbox` | Boolean | `$true` | Si `$true`, ignore les boîtes d'archivage |
+| `-EnableDebug` | Boolean | `$false` | Active les logs de débogage détaillés |
+| `-OutputObject` | Switch | - | Retourne l'objet de données au lieu du rapport HTML uniquement |
+
+---
+
+## 📊 Structure du rapport
+
+### 📄 Rapport HTML généré
+
+Le rapport `HYCU-M365-Sizing-Report.html` contient :
+
+#### 🎨 En-tête
+- Logo et branding HYCU
+- Date et heure de génération
+- Période d'analyse (180 jours)
+- Version du script
+
+#### 📈 Résumé exécutif
+- **Nombre total d'utilisateurs**
+- **Stockage total** (en GB)
+- **Nombre de workloads** protégés
+
+#### 📧 Section Exchange Online
+- Nombre de boîtes aux lettres (utilisateurs/partagées)
+- Stockage total et par utilisateur
+- Taux de croissance annuelle
+
+#### ☁️ Section OneDrive for Business
+- Nombre d'utilisateurs actifs
+- Stockage total et par utilisateur
+- Taux de croissance annuelle
+
+#### 🌐 Section SharePoint Online
+- Nombre de sites actifs
+- Stockage total et par site
+- Taux de croissance annuelle
+
+#### 🔗 Pied de page
+- Appel à l'action vers HYCU.com
+- Informations de support
+
+---
+
+## 🔍 Exemple de données collectées
+
+### Structure de l'objet retourné
+
+```powershell
+@{
+    Exchange = @{
+        NumberOfUsers = 1247
+        TotalSizeGB = 3845.67
+        SizePerUserGB = 3.08
+        AverageGrowthPercent = 18
+        ArchiveMailboxes = 145      # Si -SkipArchiveMailbox $false
+        ArchiveSizeGB = 892.34      # Si -SkipArchiveMailbox $false
+    }
+    OneDrive = @{
+        NumberOfUsers = 1189
+        TotalSizeGB = 2967.23
+        SizePerUserGB = 2.49
+        AverageGrowthPercent = 22
+    }
+    SharePoint = @{
+        NumberOfSites = 87
+        TotalSizeGB = 1840.15
+        SizePerUserGB = 21.15
+        AverageGrowthPercent = 14
+    }
+}
+```
+
+---
+
+## 🛠️ Dépannage
+
+### ❌ Erreurs courantes
+
+#### Erreur : "Module not found"
+
+```
+Required module not found: Microsoft.Graph.Reports
+```
+
+**Solution** :
+```powershell
+Install-Module Microsoft.Graph.Reports -Scope CurrentUser -Force
+```
+
+---
+
+#### Erreur : "Forbidden (Forbidden)"
+
+```
+The user account used for authentication must have permissions covered by Reports Reader admin role.
+```
+
+**Solution** :
+- Vérifiez que le compte a le rôle **Reports Reader** dans Azure AD
+- Contactez votre administrateur Microsoft 365
+
+---
+
+#### Erreur : "Failed to setup session"
+
+```
+ERROR - Failed to setup session after multiple tries
+```
+
+**Solution** :
+- Vérifiez votre connexion Internet
+- Vérifiez les identifiants Microsoft 365
+- Désactivez temporairement le VPN si applicable
+- Réessayez dans 15-30 minutes (limite de débit API)
+
+---
+
+#### Avertissement : "Could not retrieve data"
+
+```
+Warning: Could not retrieve Exchange/OneDrive/SharePoint data
+```
+
+**Solution** :
+- Vérifiez les permissions API
+- Vérifiez que les services sont activés dans votre tenant
+- Consultez les logs avec `-EnableDebug $true`
+
+---
+
+### 📝 Activer le mode débogage
+
+Pour des informations détaillées lors de l'exécution :
+
+```powershell
+.\Get-M365SizingInfo-HYCU.ps1 -EnableDebug $true 2>&1 | Tee-Object -FilePath "debug.log"
+```
+
+Cela créera un fichier `debug.log` avec tous les détails d'exécution.
+
+---
+
+## 📈 Calcul de la croissance
+
+### Méthodologie
+
+Le script calcule la croissance annuelle en :
+
+1. **Collectant** les données de stockage sur 180 jours
+2. **Calculant** le taux de croissance quotidien moyen
+3. **Extrapolant** sur une année (x2)
+4. **Arrondissant** à l'entier supérieur pour une estimation conservative
+
+### Formule
+
+```
+Croissance Quotidienne = ((Stockage_Jour_N / Stockage_Jour_N-1) - 1) × 100
+Croissance Moyenne = Moyenne(Tous les jours)
+Croissance Annuelle = Plafond(Croissance Moyenne × 2)
+```
+
+**Note** : Cette estimation est conservative et peut varier selon les habitudes d'utilisation.
+
+---
+
+## 🔐 Sécurité et confidentialité
+
+### 🛡️ Bonnes pratiques
+
+- ✅ Le script ne stocke **aucune donnée** en dehors du rapport HTML local
+- ✅ Les identifiants ne sont **jamais enregistrés** dans le script
+- ✅ Les connexions utilisent **OAuth moderne** (pas de mot de passe en clair)
+- ✅ Le rapport peut être **supprimé** après consultation
+- ✅ Utilisez un compte avec **permissions minimales** (Reports Reader)
+
+### 🔒 Recommandations
+
+- Exécutez le script depuis un poste de travail sécurisé
+- Ne partagez pas le rapport par email non chiffré
+- Supprimez les rapports après utilisation
+- Vérifiez les permissions du compte d'exécution
+
+---
+
+## 📞 Support et documentation
+
+### 🌐 Ressources HYCU
+
+- **Site Web** : [https://hycu.com](https://hycu.com)
+- **Documentation** : [https://docs.hycu.com](https://docs.hycu.com)
+- **Support** : [https://support.hycu.com](https://support.hycu.com)
+- **Community** : [https://community.hycu.com](https://community.hycu.com)
+
+### 📚 Documentation Microsoft
+
+- **Microsoft Graph API** : [https://docs.microsoft.com/graph](https://docs.microsoft.com/graph)
+- **Exchange Online PowerShell** : [https://docs.microsoft.com/powershell/exchange](https://docs.microsoft.com/powershell/exchange)
+- **Azure AD Roles** : [https://docs.microsoft.com/azure/active-directory/roles](https://docs.microsoft.com/azure/active-directory/roles)
+
+---
+
+## 🔄 Changelog
+
+### Version 4.4-HYCU (Janvier 2026)
+- ✨ Nouvelle interface HTML moderne inspirée de HYCU.com
+- ✨ Branding HYCU complet (logo, couleurs, CTA)
+- 🔧 Optimisation du code pour meilleures performances
+- 🔧 Amélioration des messages d'erreur
+- 🔧 Ajout de barres de progression
+- 📝 Documentation enrichie
+- 🐛 Corrections diverses de bugs
+- ❌ Suppression de toute référence à d'autres marques
+
+---
+
+## 📄 Licence
+
+Ce script est fourni par **HYCU, Inc.** dans le cadre des services professionnels.
+
+Copyright © 2026 HYCU, Inc. Tous droits réservés.
+
+---
+
+## 👥 Auteurs
+
+- **HYCU Professional Services Team**
+- Version optimisée : Janvier 2026
+
+---
+
+## 🤝 Contribution
+
+Pour toute suggestion d'amélioration ou rapport de bug, contactez votre représentant HYCU.
+
+---
+
+## ⚠️ Avertissements
+
+- Ce script nécessite des permissions d'administration dans Microsoft 365
+- L'exécution peut prendre 5-30 minutes selon la taille de l'environnement
+- L'analyse des boîtes d'archivage peut augmenter significativement le temps d'exécution
+- Les API Microsoft 365 ont des limites de débit - espacez les exécutions
+- Les résultats sont basés sur les données des 180 derniers jours
+
+---
+
+## 📊 Exemple visuel
+
+Le rapport généré ressemble à ceci :
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║          HYCU for Microsoft 365                              ║
+║      Environment Sizing Assessment Report                    ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  RÉSUMÉ EXÉCUTIF                                            ║
+║  ┌─────────────┬─────────────────┬─────────────────┐       ║
+║  │ Total Users │ Total Storage   │ Workloads       │       ║
+║  │    1,247    │    8,652 GB     │      3          │       ║
+║  └─────────────┴─────────────────┴─────────────────┘       ║
+║                                                              ║
+║  📧 EXCHANGE ONLINE                                         ║
+║  ┌─────────────────────────────────────────────────┐       ║
+║  │ Mailboxes: 1,247 | Storage: 3,845 GB           │       ║
+║  │ Avg/User: 3.08 GB | Growth: 18% annually       │       ║
+║  └─────────────────────────────────────────────────┘       ║
+║                                                              ║
+║  ☁️ ONEDRIVE FOR BUSINESS                                   ║
+║  ┌─────────────────────────────────────────────────┐       ║
+║  │ Users: 1,189 | Storage: 2,967 GB               │       ║
+║  │ Avg/User: 2.49 GB | Growth: 22% annually       │       ║
+║  └─────────────────────────────────────────────────┘       ║
+║                                                              ║
+║  🌐 SHAREPOINT ONLINE                                       ║
+║  ┌─────────────────────────────────────────────────┐       ║
+║  │ Sites: 87 | Storage: 1,840 GB                  │       ║
+║  │ Avg/Site: 21.15 GB | Growth: 14% annually      │       ║
+║  └─────────────────────────────────────────────────┘       ║
+║                                                              ║
+║  Ready to Protect Your Microsoft 365 Environment?          ║
+║  Learn More at hycu.com                                     ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+---
+
+**Pour toute question, visitez [hycu.com](https://hycu.com) ou contactez votre équipe HYCU.**
+
+---
+
+*Ce document est maintenu par HYCU Professional Services - Dernière mise à jour : Janvier 2026*
