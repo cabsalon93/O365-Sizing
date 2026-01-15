@@ -359,9 +359,7 @@ Croissance Annuelle = Plafond(Croissance Moyenne × 2)
 ### 🌐 Ressources HYCU
 
 - **Site Web** : [https://hycu.com](https://hycu.com)
-- **Documentation** : [https://docs.hycu.com](https://docs.hycu.com)
-- **Support** : [https://support.hycu.com](https://support.hycu.com)
-- **Community** : [https://community.hycu.com](https://community.hycu.com)
+
 
 ### 📚 Documentation Microsoft
 
@@ -459,6 +457,4 @@ Le rapport généré ressemble à ceci :
 
 **Pour toute question, visitez [hycu.com](https://hycu.com) ou contactez votre équipe HYCU.**
 
----
 
-*Ce document est maintenu par HYCU Professional Services - Dernière mise à jour : Janvier 2026*
