@@ -329,9 +329,9 @@ function Test-O365Session {
 
 #region Module Validation
 
-Write-Output "`n═══════════════════════════════════════════════════════════════"
+Write-Output "`n==================================================================="
 Write-Output "  HYCU for Microsoft 365 - Sizing Assessment Tool ($Version)"
-Write-Output "═══════════════════════════════════════════════════════════════`n"
+Write-Output "===================================================================`n"
 
 # Validate Microsoft.Graph.Reports module
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Reports)) {
@@ -357,7 +357,7 @@ For more information, visit: https://docs.microsoft.com/powershell/exchange/exch
 "@
 }
 
-Write-Output "[✓] All required PowerShell modules are installed`n"
+Write-Output "[OK] All required PowerShell modules are installed`n"
 
 #endregion
 
@@ -391,15 +391,15 @@ $M365Sizing = [ordered]@{
 $AzureAdRequired = -not [string]::IsNullOrWhiteSpace($AzureAdGroupName)
 
 if ($AzureAdRequired) {
-    Write-Output "════════════════════════════════════════════════════════════════"
+    Write-Output "===================================================================="
     Write-Output "  Filtering by Azure AD Group: $AzureAdGroupName"
-    Write-Output "════════════════════════════════════════════════════════════════`n"
+    Write-Output "====================================================================`n"
     
     try {
-        Write-Output "[→] Connecting to Microsoft Graph..."
+        Write-Output "[->] Connecting to Microsoft Graph..."
         Connect-MgGraph -Scopes "Group.Read.All", "GroupMember.Read.All", "User.Read.All", "Reports.Read.All" -NoWelcome
         
-        Write-Output "[→] Retrieving group members..."
+        Write-Output "[->] Retrieving group members..."
         $AzureAdGroup = Get-MgGroup -Filter "displayName eq '$AzureAdGroupName'" -ErrorAction Stop
         
         if ($null -eq $AzureAdGroup) {
@@ -416,116 +416,116 @@ if ($AzureAdRequired) {
             }
         }
         
-        Write-Output "[✓] Found $($AzureAdGroupMembersByUserPrincipalName.Count) users in group`n"
+        Write-Output "[OK] Found $($AzureAdGroupMembersByUserPrincipalName.Count) users in group`n"
     }
     catch {
         throw "Failed to process Azure AD group: $_"
     }
 }
 else {
-    Write-Output "════════════════════════════════════════════════════════════════"
+    Write-Output "===================================================================="
     Write-Output "  Analyzing Full M365 Environment"
-    Write-Output "════════════════════════════════════════════════════════════════`n"
+    Write-Output "====================================================================`n"
     
-    Write-Output "[→] Connecting to Microsoft Graph..."
+    Write-Output "[->] Connecting to Microsoft Graph..."
     Connect-MgGraph -Scopes "Reports.Read.All" -NoWelcome
-    Write-Output "[✓] Connected to Microsoft Graph`n"
+    Write-Output "[OK] Connected to Microsoft Graph`n"
 }
 
 #endregion
 
 #region Exchange Online Processing
 
-Write-Output "════════════════════════════════════════════════════════════════"
+Write-Output "===================================================================="
 Write-Output "  Processing Exchange Online Data"
-Write-Output "════════════════════════════════════════════════════════════════`n"
+Write-Output "====================================================================`n"
 
 try {
-    Write-Output "[→] Retrieving Exchange mailbox usage report (last $Period days)..."
+    Write-Output "[->] Retrieving Exchange mailbox usage report (last $Period days)..."
     $ExchangeReport = Get-MgReport -ReportName "getMailboxUsageDetail" -Period $Period
-    Write-Output "[✓] Exchange usage report retrieved"
+    Write-Output "[OK] Exchange usage report retrieved"
     
-    Write-Output "[→] Retrieving Exchange storage report..."
+    Write-Output "[->] Retrieving Exchange storage report..."
     $ExchangeStorageReport = Get-MgReport -ReportName "getMailboxUsageStorage" -Period $Period
-    Write-Output "[✓] Exchange storage report retrieved"
+    Write-Output "[OK] Exchange storage report retrieved"
     
-    Write-Output "[→] Processing Exchange data..."
+    Write-Output "[->] Processing Exchange data..."
     ProcessUsageReport -ReportCSV $ExchangeReport -ReportName "getMailboxUsageDetail" -Section "Exchange"
     
-    Write-Output "[→] Calculating growth trends..."
+    Write-Output "[->] Calculating growth trends..."
     $M365Sizing.Exchange.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $ExchangeStorageReport -ReportName "getMailboxUsageStorage"
     
-    Write-Output "[✓] Exchange analysis complete"
-    Write-Output "    • Mailboxes: $($M365Sizing.Exchange.NumberOfUsers)"
-    Write-Output "    • Total Storage: $($M365Sizing.Exchange.TotalSizeGB) GB"
-    Write-Output "    • Annual Growth: $($M365Sizing.Exchange.AverageGrowthPercent)%`n"
+    Write-Output "[OK] Exchange analysis complete"
+    Write-Output "    - Mailboxes: $($M365Sizing.Exchange.NumberOfUsers)"
+    Write-Output "    - Total Storage: $($M365Sizing.Exchange.TotalSizeGB) GB"
+    Write-Output "    - Annual Growth: $($M365Sizing.Exchange.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[!] Warning: Could not retrieve Exchange data - $_`n"
+    Write-Output "[WARN] Warning: Could not retrieve Exchange data - $_`n"
 }
 
 #endregion
 
 #region OneDrive Processing
 
-Write-Output "════════════════════════════════════════════════════════════════"
+Write-Output "===================================================================="
 Write-Output "  Processing OneDrive for Business Data"
-Write-Output "════════════════════════════════════════════════════════════════`n"
+Write-Output "====================================================================`n"
 
 try {
-    Write-Output "[→] Retrieving OneDrive usage report (last $Period days)..."
+    Write-Output "[->] Retrieving OneDrive usage report (last $Period days)..."
     $OneDriveReport = Get-MgReport -ReportName "getOneDriveUsageAccountDetail" -Period $Period
-    Write-Output "[✓] OneDrive usage report retrieved"
+    Write-Output "[OK] OneDrive usage report retrieved"
     
-    Write-Output "[→] Retrieving OneDrive storage report..."
+    Write-Output "[->] Retrieving OneDrive storage report..."
     $OneDriveStorageReport = Get-MgReport -ReportName "getOneDriveUsageStorage" -Period $Period
-    Write-Output "[✓] OneDrive storage report retrieved"
+    Write-Output "[OK] OneDrive storage report retrieved"
     
-    Write-Output "[→] Processing OneDrive data..."
+    Write-Output "[->] Processing OneDrive data..."
     ProcessUsageReport -ReportCSV $OneDriveReport -ReportName "getOneDriveUsageAccountDetail" -Section "OneDrive"
     
-    Write-Output "[→] Calculating growth trends..."
+    Write-Output "[->] Calculating growth trends..."
     $M365Sizing.OneDrive.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $OneDriveStorageReport -ReportName "getOneDriveUsageStorage"
     
-    Write-Output "[✓] OneDrive analysis complete"
-    Write-Output "    • Active Users: $($M365Sizing.OneDrive.NumberOfUsers)"
-    Write-Output "    • Total Storage: $($M365Sizing.OneDrive.TotalSizeGB) GB"
-    Write-Output "    • Annual Growth: $($M365Sizing.OneDrive.AverageGrowthPercent)%`n"
+    Write-Output "[OK] OneDrive analysis complete"
+    Write-Output "    - Active Users: $($M365Sizing.OneDrive.NumberOfUsers)"
+    Write-Output "    - Total Storage: $($M365Sizing.OneDrive.TotalSizeGB) GB"
+    Write-Output "    - Annual Growth: $($M365Sizing.OneDrive.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[!] Warning: Could not retrieve OneDrive data - $_`n"
+    Write-Output "[WARN] Warning: Could not retrieve OneDrive data - $_`n"
 }
 
 #endregion
 
 #region SharePoint Processing
 
-Write-Output "════════════════════════════════════════════════════════════════"
+Write-Output "===================================================================="
 Write-Output "  Processing SharePoint Online Data"
-Write-Output "════════════════════════════════════════════════════════════════`n"
+Write-Output "====================================================================`n"
 
 try {
-    Write-Output "[→] Retrieving SharePoint site usage report (last $Period days)..."
+    Write-Output "[->] Retrieving SharePoint site usage report (last $Period days)..."
     $SharePointReport = Get-MgReport -ReportName "getSharePointSiteUsageDetail" -Period $Period
-    Write-Output "[✓] SharePoint usage report retrieved"
+    Write-Output "[OK] SharePoint usage report retrieved"
     
-    Write-Output "[→] Retrieving SharePoint storage report..."
+    Write-Output "[->] Retrieving SharePoint storage report..."
     $SharePointStorageReport = Get-MgReport -ReportName "getSharePointSiteUsageStorage" -Period $Period
-    Write-Output "[✓] SharePoint storage report retrieved"
+    Write-Output "[OK] SharePoint storage report retrieved"
     
-    Write-Output "[→] Processing SharePoint data..."
+    Write-Output "[->] Processing SharePoint data..."
     ProcessUsageReport -ReportCSV $SharePointReport -ReportName "getSharePointSiteUsageDetail" -Section "SharePoint"
     
-    Write-Output "[→] Calculating growth trends..."
+    Write-Output "[->] Calculating growth trends..."
     $M365Sizing.SharePoint.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $SharePointStorageReport -ReportName "getSharePointSiteUsageStorage"
     
-    Write-Output "[✓] SharePoint analysis complete"
-    Write-Output "    • Active Sites: $($M365Sizing.SharePoint.NumberOfSites)"
-    Write-Output "    • Total Storage: $($M365Sizing.SharePoint.TotalSizeGB) GB"
-    Write-Output "    • Annual Growth: $($M365Sizing.SharePoint.AverageGrowthPercent)%`n"
+    Write-Output "[OK] SharePoint analysis complete"
+    Write-Output "    - Active Sites: $($M365Sizing.SharePoint.NumberOfSites)"
+    Write-Output "    - Total Storage: $($M365Sizing.SharePoint.TotalSizeGB) GB"
+    Write-Output "    - Annual Growth: $($M365Sizing.SharePoint.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[!] Warning: Could not retrieve SharePoint data - $_`n"
+    Write-Output "[WARN] Warning: Could not retrieve SharePoint data - $_`n"
 }
 
 #endregion
@@ -533,12 +533,12 @@ catch {
 #region Archive Mailbox Processing (Optional)
 
 if (-not $SkipArchiveMailbox) {
-    Write-Output "════════════════════════════════════════════════════════════════"
+    Write-Output "===================================================================="
     Write-Output "  Processing Archive Mailboxes"
-    Write-Output "════════════════════════════════════════════════════════════════`n"
+    Write-Output "====================================================================`n"
     
     try {
-        Write-Output "[→] Connecting to Exchange Online..."
+        Write-Output "[->] Connecting to Exchange Online..."
         
         $UserPrincipalName = (Get-MgContext).Account
         $script:UserPrincipalName = $UserPrincipalName
@@ -547,7 +547,7 @@ if (-not $SkipArchiveMailbox) {
         
         New-CleanO365Session
         
-        Write-Output "[→] Retrieving archive mailbox data..."
+        Write-Output "[->] Retrieving archive mailbox data..."
         
         if ($AzureAdRequired) {
             $Mailboxes = Get-EXOMailbox -ResultSize Unlimited -Properties ArchiveStatus, ArchiveDatabase |
@@ -561,7 +561,7 @@ if (-not $SkipArchiveMailbox) {
                 Where-Object { $_.ArchiveStatus -eq "Active" }
         }
         
-        Write-Output "[→] Found $($Mailboxes.Count) archive mailboxes to process"
+        Write-Output "[->] Found $($Mailboxes.Count) archive mailboxes to process"
         
         $ArchiveStats = @{
             TotalArchives = 0
@@ -586,7 +586,7 @@ if (-not $SkipArchiveMailbox) {
                 
                 if ($processedCount % 50 -eq 0) {
                     $percentComplete = [math]::Round(($processedCount / $Mailboxes.Count) * 100)
-                    Write-Output "[→] Progress: $processedCount/$($Mailboxes.Count) ($percentComplete%)"
+                    Write-Output "[->] Progress: $processedCount/$($Mailboxes.Count) ($percentComplete percent)"
                 }
             }
             catch {
@@ -596,9 +596,9 @@ if (-not $SkipArchiveMailbox) {
         
         $ArchiveStats.TotalSizeGB = [math]::Round($ArchiveStats.TotalSizeGB, 2)
         
-        Write-Output "[✓] Archive mailbox analysis complete"
-        Write-Output "    • Active Archives: $($ArchiveStats.TotalArchives)"
-        Write-Output "    • Total Archive Storage: $($ArchiveStats.TotalSizeGB) GB`n"
+        Write-Output "[OK] Archive mailbox analysis complete"
+        Write-Output "    - Active Archives: $($ArchiveStats.TotalArchives)"
+        Write-Output "    - Total Archive Storage: $($ArchiveStats.TotalSizeGB) GB`n"
         
         # Add to sizing object
         $M365Sizing.Exchange.ArchiveMailboxes = $ArchiveStats.TotalArchives
@@ -607,7 +607,7 @@ if (-not $SkipArchiveMailbox) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
     }
     catch {
-        Write-Output "[!] Warning: Archive mailbox processing failed - $_`n"
+        Write-Output "[WARN] Warning: Archive mailbox processing failed - $_`n"
     }
 }
 
@@ -615,9 +615,9 @@ if (-not $SkipArchiveMailbox) {
 
 #region HTML Report Generation
 
-Write-Output "════════════════════════════════════════════════════════════════"
+Write-Output "===================================================================="
 Write-Output "  Generating HYCU Sizing Report"
-Write-Output "════════════════════════════════════════════════════════════════`n"
+Write-Output "====================================================================`n"
 
 $reportDate = Get-Date -Format "MMMM dd, yyyy 'at' HH:mm"
 $totalUsers = [math]::Max($M365Sizing.Exchange.NumberOfUsers, $M365Sizing.OneDrive.NumberOfUsers)
@@ -1106,10 +1106,10 @@ $HTML_CODE = @"
 $reportPath = Join-Path (Get-Location) "HYCU-M365-Sizing-Report.html"
 $HTML_CODE | Out-File -FilePath $reportPath -Encoding UTF8 -Force
 
-Write-Output "[✓] Report generated successfully!"
-Write-Output "`n═══════════════════════════════════════════════════════════════"
-Write-Output "  📄 Report Location"
-Write-Output "═══════════════════════════════════════════════════════════════"
+Write-Output "[OK] Report generated successfully!"
+Write-Output "`n==================================================================="
+Write-Output "  -- Report Location"
+Write-Output "==================================================================="
 Write-Output "`n    $reportPath`n"
 
 #endregion
