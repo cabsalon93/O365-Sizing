@@ -1,0 +1,15 @@
+# Generated sizing report (the committed *-Example.html is kept as a sample)
+HYCU-M365-Sizing-Report.html
+
+# Debug logs
+debug.log
+*.log
+
+# Temporary Graph report exports
+*.csv
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/

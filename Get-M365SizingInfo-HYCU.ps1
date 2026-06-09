@@ -47,21 +47,22 @@ param (
     
     [Parameter()]
     [bool]$EnableDebug = $false,
-    
+
     [Parameter()]
-    $OutputObject
+    [switch]$OutputObject
 )
 
 #region Configuration
-$Version = "v4.4-HYCU"
+$Version = "v4.5-HYCU"
 $Period = '180'
 $systemTempFolder = [System.IO.Path]::GetTempPath()
+# Suppress noisy download progress from Invoke-MgGraphRequest. The custom
+# Start-SleepWithProgress re-enables progress locally where it is needed.
 $ProgressPreference = 'SilentlyContinue'
 
-# Initialize counters
-$ExchangeHTMLTitle = "User"
-$ExchangeUserMailboxCount = 0
-$ExchangeSharedMailboxCount = 0
+# Initialize counters (licensed = user mailboxes, unlicensed = shared/room/equipment)
+$ExchangeLicensedCount = 0
+$ExchangeUnlicensedCount = 0
 #endregion
 
 #region Helper Functions
@@ -70,7 +71,7 @@ function Write-Log {
     param([string]$Message)
     if ($EnableDebug) {
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        Write-Output "[$timestamp] $Message"
+        Write-Host "[$timestamp] $Message"
     }
 }
 
@@ -116,54 +117,55 @@ function Get-MgReport {
 function Measure-AverageGrowth {
     <#
     .SYNOPSIS
-        Calculates annual storage growth rate from historical data
+        Calculates the annualized storage growth rate from historical data.
+    .DESCRIPTION
+        The usage storage reports return one data point per day over the analysis
+        period. Rather than averaging noisy day-over-day deltas, this projects the
+        net growth between the first and last data points to a full year using a
+        compound (CAGR-style) formula:
+
+            AnnualGrowth% = ((Last / First) ^ (365 / Days) - 1) * 100
+
+        This is mathematically meaningful regardless of the period length and is
+        robust to daily fluctuations.
     #>
     param (
         [Parameter(Mandatory)]
         [string]$ReportCSV,
-        
+
         [Parameter(Mandatory)]
         [string]$ReportName
     )
-    
+
     try {
-        $UsageReport = Import-Csv -Path $ReportCSV | 
+        $UsageReport = Import-Csv -Path $ReportCSV |
             Where-Object { $_.'Is Deleted' -eq 'FALSE' } |
             Sort-Object -Property "Report Date"
-        
+
         if ($ReportName -eq 'getOneDriveUsageStorage') {
             $UsageReport = $UsageReport | Where-Object { $_.'Site Type' -eq 'OneDrive' }
         }
-        
-        $Record = 1
-        $StorageUsage = @()
-        
-        foreach ($item in $UsageReport) {
-            if ($Record -eq 1) {
-                $StorageUsed = [decimal]$item."Storage Used (Byte)"
-            }
-            else {
-                $currentStorage = [decimal]$item."Storage Used (Byte)"
-                
-                if ($StorageUsed -gt 0) {
-                    $growthPercent = [math]::Round(((($currentStorage / $StorageUsed) - 1) * 100), 2)
-                    $StorageUsage += [PSCustomObject]@{ Growth = $growthPercent }
-                }
-                else {
-                    $StorageUsage += [PSCustomObject]@{ Growth = 0 }
-                }
-                
-                $StorageUsed = $currentStorage
-            }
-            $Record++
+
+        # Keep only days with real usage so the ratio is well defined.
+        $Points = @($UsageReport | Where-Object { [decimal]$_."Storage Used (Byte)" -gt 0 })
+
+        if ($Points.Count -lt 2) {
+            Write-Log "Not enough data points to compute growth; defaulting to 0%"
+            return 0
         }
-        
-        $AverageGrowth = ($StorageUsage | Measure-Object -Property Growth -Average).Average
-        # Convert 180-day average to annual growth estimate
-        $AnnualGrowth = [math]::Ceiling($AverageGrowth * 2)
-        
-        Write-Log "Calculated annual growth rate: $AnnualGrowth%"
-        return $AnnualGrowth
+
+        $First = [double]($Points[0]."Storage Used (Byte)")
+        $Last = [double]($Points[-1]."Storage Used (Byte)")
+        $Days = $Points.Count - 1
+
+        if ($First -le 0 -or $Days -le 0) {
+            return 0
+        }
+
+        $AnnualGrowth = [math]::Round((([math]::Pow($Last / $First, 365 / $Days)) - 1) * 100, 0)
+
+        Write-Log "Calculated annualized growth rate: $AnnualGrowth% (from $($Points.Count) data points over $Days days)"
+        return [int]$AnnualGrowth
     }
     catch {
         Write-Log "Error calculating growth rate: $_"
@@ -200,25 +202,32 @@ function ProcessUsageReport {
     }
     
     $SummarizedData = $ReportDetail | Measure-Object -Property 'Storage Used (Byte)' -Sum -Average
-    
+
     # Update sizing object based on section
     switch ($Section) {
         'SharePoint' {
             $script:M365Sizing.$Section.NumberOfSites = $SummarizedData.Count
         }
         'Exchange' {
-            $userMailboxes = $ReportDetail | Where-Object { $_.'Recipient Type' -eq 'User' }
-            $sharedMailboxes = $ReportDetail | Where-Object { $_.'Recipient Type' -eq 'Shared' }
-            
-            if ($sharedMailboxes.Count -ge $userMailboxes.Count) {
-                $script:M365Sizing.$Section.NumberOfUsers = $sharedMailboxes.Count
-                $script:ExchangeHTMLTitle = "Mailboxes"
-                $script:ExchangeSharedMailboxCount = $sharedMailboxes.Count
-            }
-            else {
-                $script:M365Sizing.$Section.NumberOfUsers = $userMailboxes.Count
-                $script:ExchangeUserMailboxCount = $userMailboxes.Count
-            }
+            # Differentiate licensed vs unlicensed mailboxes.
+            # User mailboxes consume a license; shared/room/equipment mailboxes
+            # typically do not. The usage report exposes the mailbox type via the
+            # 'Recipient Type' column (beta endpoint). Anything that is not a user
+            # mailbox is treated as unlicensed for sizing purposes.
+            $licensedMailboxes = @($ReportDetail | Where-Object { $_.'Recipient Type' -like 'User*' })
+            $unlicensedMailboxes = @($ReportDetail | Where-Object { $_.'Recipient Type' -notlike 'User*' })
+
+            $licensedSize = ($licensedMailboxes | Measure-Object -Property 'Storage Used (Byte)' -Sum).Sum
+            $unlicensedSize = ($unlicensedMailboxes | Measure-Object -Property 'Storage Used (Byte)' -Sum).Sum
+
+            $script:M365Sizing.$Section.NumberOfUsers = $SummarizedData.Count
+            $script:M365Sizing.$Section.LicensedMailboxes = $licensedMailboxes.Count
+            $script:M365Sizing.$Section.UnlicensedMailboxes = $unlicensedMailboxes.Count
+            $script:M365Sizing.$Section.LicensedSizeGB = [math]::Round(($licensedSize / 1GB), 2)
+            $script:M365Sizing.$Section.UnlicensedSizeGB = [math]::Round(($unlicensedSize / 1GB), 2)
+
+            $script:ExchangeLicensedCount = $licensedMailboxes.Count
+            $script:ExchangeUnlicensedCount = $unlicensedMailboxes.Count
         }
         default {
             $script:M365Sizing.$Section.NumberOfUsers = $SummarizedData.Count
@@ -226,7 +235,13 @@ function ProcessUsageReport {
     }
 
     $script:M365Sizing.$Section.TotalSizeGB = [math]::Round(($SummarizedData.Sum / 1GB), 2)
-    $script:M365Sizing.$Section.SizePerUserGB = [math]::Round(($SummarizedData.Average / 1GB), 2)
+
+    if ($Section -eq 'SharePoint') {
+        $script:M365Sizing.$Section.SizePerSiteGB = [math]::Round(($SummarizedData.Average / 1GB), 2)
+    }
+    else {
+        $script:M365Sizing.$Section.SizePerUserGB = [math]::Round(($SummarizedData.Average / 1GB), 2)
+    }
 }
 
 function Start-SleepWithProgress {
@@ -243,7 +258,10 @@ function Start-SleepWithProgress {
         Start-Sleep -Milliseconds $Milliseconds
         return
     }
-    
+
+    # Locally re-enable progress (globally suppressed for Graph downloads).
+    $ProgressPreference = 'Continue'
+
     for ($i = 0; $i -lt $SleepTime; $i++) {
         $percent = [math]::Round(($i / $SleepTime) * 100)
         Write-Progress -Activity "Processing" -Status "Please wait... $percent% complete" -PercentComplete $percent
@@ -329,9 +347,9 @@ function Test-O365Session {
 
 #region Module Validation
 
-Write-Output "`n==================================================================="
-Write-Output "  HYCU for Microsoft 365 - Sizing Assessment Tool ($Version)"
-Write-Output "===================================================================`n"
+Write-Host "`n==================================================================="
+Write-Host "  HYCU for Microsoft 365 - Sizing Assessment Tool ($Version)"
+Write-Host "===================================================================`n"
 
 # Validate Microsoft.Graph.Reports module
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Reports)) {
@@ -357,7 +375,7 @@ For more information, visit: https://docs.microsoft.com/powershell/exchange/exch
 "@
 }
 
-Write-Output "[OK] All required PowerShell modules are installed`n"
+Write-Host "[OK] All required PowerShell modules are installed`n"
 
 #endregion
 
@@ -365,8 +383,12 @@ Write-Output "[OK] All required PowerShell modules are installed`n"
 
 $M365Sizing = [ordered]@{
     Exchange = [ordered]@{
-        NumberOfUsers = 0
+        NumberOfUsers = 0          # Total mailboxes (licensed + unlicensed)
+        LicensedMailboxes = 0      # User mailboxes (consume a license)
+        UnlicensedMailboxes = 0    # Shared / room / equipment mailboxes
         TotalSizeGB = 0
+        LicensedSizeGB = 0
+        UnlicensedSizeGB = 0
         SizePerUserGB = 0
         AverageGrowthPercent = 0
     }
@@ -379,7 +401,7 @@ $M365Sizing = [ordered]@{
     SharePoint = [ordered]@{
         NumberOfSites = 0
         TotalSizeGB = 0
-        SizePerUserGB = 0
+        SizePerSiteGB = 0
         AverageGrowthPercent = 0
     }
 }
@@ -391,16 +413,17 @@ $M365Sizing = [ordered]@{
 $AzureAdRequired = -not [string]::IsNullOrWhiteSpace($AzureAdGroupName)
 
 if ($AzureAdRequired) {
-    Write-Output "===================================================================="
-    Write-Output "  Filtering by Azure AD Group: $AzureAdGroupName"
-    Write-Output "====================================================================`n"
+    Write-Host "===================================================================="
+    Write-Host "  Filtering by Azure AD Group: $AzureAdGroupName"
+    Write-Host "====================================================================`n"
     
     try {
-        Write-Output "[->] Connecting to Microsoft Graph..."
+        Write-Host "[->] Connecting to Microsoft Graph..."
         Connect-MgGraph -Scopes "Group.Read.All", "GroupMember.Read.All", "User.Read.All", "Reports.Read.All" -NoWelcome
         
-        Write-Output "[->] Retrieving group members..."
-        $AzureAdGroup = Get-MgGroup -Filter "displayName eq '$AzureAdGroupName'" -ErrorAction Stop
+        Write-Host "[->] Retrieving group members..."
+        $escapedGroupName = $AzureAdGroupName.Replace("'", "''")
+        $AzureAdGroup = Get-MgGroup -Filter "displayName eq '$escapedGroupName'" -ErrorAction Stop
         
         if ($null -eq $AzureAdGroup) {
             throw "Azure AD group '$AzureAdGroupName' not found. Please verify the group name."
@@ -416,116 +439,118 @@ if ($AzureAdRequired) {
             }
         }
         
-        Write-Output "[OK] Found $($AzureAdGroupMembersByUserPrincipalName.Count) users in group`n"
+        Write-Host "[OK] Found $($AzureAdGroupMembersByUserPrincipalName.Count) users in group`n"
     }
     catch {
         throw "Failed to process Azure AD group: $_"
     }
 }
 else {
-    Write-Output "===================================================================="
-    Write-Output "  Analyzing Full M365 Environment"
-    Write-Output "====================================================================`n"
+    Write-Host "===================================================================="
+    Write-Host "  Analyzing Full M365 Environment"
+    Write-Host "====================================================================`n"
     
-    Write-Output "[->] Connecting to Microsoft Graph..."
+    Write-Host "[->] Connecting to Microsoft Graph..."
     Connect-MgGraph -Scopes "Reports.Read.All" -NoWelcome
-    Write-Output "[OK] Connected to Microsoft Graph`n"
+    Write-Host "[OK] Connected to Microsoft Graph`n"
 }
 
 #endregion
 
 #region Exchange Online Processing
 
-Write-Output "===================================================================="
-Write-Output "  Processing Exchange Online Data"
-Write-Output "====================================================================`n"
+Write-Host "===================================================================="
+Write-Host "  Processing Exchange Online Data"
+Write-Host "====================================================================`n"
 
 try {
-    Write-Output "[->] Retrieving Exchange mailbox usage report (last $Period days)..."
+    Write-Host "[->] Retrieving Exchange mailbox usage report (last $Period days)..."
     $ExchangeReport = Get-MgReport -ReportName "getMailboxUsageDetail" -Period $Period
-    Write-Output "[OK] Exchange usage report retrieved"
+    Write-Host "[OK] Exchange usage report retrieved"
     
-    Write-Output "[->] Retrieving Exchange storage report..."
+    Write-Host "[->] Retrieving Exchange storage report..."
     $ExchangeStorageReport = Get-MgReport -ReportName "getMailboxUsageStorage" -Period $Period
-    Write-Output "[OK] Exchange storage report retrieved"
+    Write-Host "[OK] Exchange storage report retrieved"
     
-    Write-Output "[->] Processing Exchange data..."
+    Write-Host "[->] Processing Exchange data..."
     ProcessUsageReport -ReportCSV $ExchangeReport -ReportName "getMailboxUsageDetail" -Section "Exchange"
     
-    Write-Output "[->] Calculating growth trends..."
+    Write-Host "[->] Calculating growth trends..."
     $M365Sizing.Exchange.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $ExchangeStorageReport -ReportName "getMailboxUsageStorage"
     
-    Write-Output "[OK] Exchange analysis complete"
-    Write-Output "    - Mailboxes: $($M365Sizing.Exchange.NumberOfUsers)"
-    Write-Output "    - Total Storage: $($M365Sizing.Exchange.TotalSizeGB) GB"
-    Write-Output "    - Annual Growth: $($M365Sizing.Exchange.AverageGrowthPercent) percent`n"
+    Write-Host "[OK] Exchange analysis complete"
+    Write-Host "    - Total Mailboxes: $($M365Sizing.Exchange.NumberOfUsers)"
+    Write-Host "    - Licensed (user): $($M365Sizing.Exchange.LicensedMailboxes) ($($M365Sizing.Exchange.LicensedSizeGB) GB)"
+    Write-Host "    - Unlicensed (shared/room/equip.): $($M365Sizing.Exchange.UnlicensedMailboxes) ($($M365Sizing.Exchange.UnlicensedSizeGB) GB)"
+    Write-Host "    - Total Storage: $($M365Sizing.Exchange.TotalSizeGB) GB"
+    Write-Host "    - Annual Growth: $($M365Sizing.Exchange.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[WARN] Warning: Could not retrieve Exchange data - $_`n"
+    Write-Host "[WARN] Warning: Could not retrieve Exchange data - $_`n"
 }
 
 #endregion
 
 #region OneDrive Processing
 
-Write-Output "===================================================================="
-Write-Output "  Processing OneDrive for Business Data"
-Write-Output "====================================================================`n"
+Write-Host "===================================================================="
+Write-Host "  Processing OneDrive for Business Data"
+Write-Host "====================================================================`n"
 
 try {
-    Write-Output "[->] Retrieving OneDrive usage report (last $Period days)..."
+    Write-Host "[->] Retrieving OneDrive usage report (last $Period days)..."
     $OneDriveReport = Get-MgReport -ReportName "getOneDriveUsageAccountDetail" -Period $Period
-    Write-Output "[OK] OneDrive usage report retrieved"
+    Write-Host "[OK] OneDrive usage report retrieved"
     
-    Write-Output "[->] Retrieving OneDrive storage report..."
+    Write-Host "[->] Retrieving OneDrive storage report..."
     $OneDriveStorageReport = Get-MgReport -ReportName "getOneDriveUsageStorage" -Period $Period
-    Write-Output "[OK] OneDrive storage report retrieved"
+    Write-Host "[OK] OneDrive storage report retrieved"
     
-    Write-Output "[->] Processing OneDrive data..."
+    Write-Host "[->] Processing OneDrive data..."
     ProcessUsageReport -ReportCSV $OneDriveReport -ReportName "getOneDriveUsageAccountDetail" -Section "OneDrive"
     
-    Write-Output "[->] Calculating growth trends..."
+    Write-Host "[->] Calculating growth trends..."
     $M365Sizing.OneDrive.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $OneDriveStorageReport -ReportName "getOneDriveUsageStorage"
     
-    Write-Output "[OK] OneDrive analysis complete"
-    Write-Output "    - Active Users: $($M365Sizing.OneDrive.NumberOfUsers)"
-    Write-Output "    - Total Storage: $($M365Sizing.OneDrive.TotalSizeGB) GB"
-    Write-Output "    - Annual Growth: $($M365Sizing.OneDrive.AverageGrowthPercent) percent`n"
+    Write-Host "[OK] OneDrive analysis complete"
+    Write-Host "    - Active Users: $($M365Sizing.OneDrive.NumberOfUsers)"
+    Write-Host "    - Total Storage: $($M365Sizing.OneDrive.TotalSizeGB) GB"
+    Write-Host "    - Annual Growth: $($M365Sizing.OneDrive.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[WARN] Warning: Could not retrieve OneDrive data - $_`n"
+    Write-Host "[WARN] Warning: Could not retrieve OneDrive data - $_`n"
 }
 
 #endregion
 
 #region SharePoint Processing
 
-Write-Output "===================================================================="
-Write-Output "  Processing SharePoint Online Data"
-Write-Output "====================================================================`n"
+Write-Host "===================================================================="
+Write-Host "  Processing SharePoint Online Data"
+Write-Host "====================================================================`n"
 
 try {
-    Write-Output "[->] Retrieving SharePoint site usage report (last $Period days)..."
+    Write-Host "[->] Retrieving SharePoint site usage report (last $Period days)..."
     $SharePointReport = Get-MgReport -ReportName "getSharePointSiteUsageDetail" -Period $Period
-    Write-Output "[OK] SharePoint usage report retrieved"
+    Write-Host "[OK] SharePoint usage report retrieved"
     
-    Write-Output "[->] Retrieving SharePoint storage report..."
+    Write-Host "[->] Retrieving SharePoint storage report..."
     $SharePointStorageReport = Get-MgReport -ReportName "getSharePointSiteUsageStorage" -Period $Period
-    Write-Output "[OK] SharePoint storage report retrieved"
+    Write-Host "[OK] SharePoint storage report retrieved"
     
-    Write-Output "[->] Processing SharePoint data..."
+    Write-Host "[->] Processing SharePoint data..."
     ProcessUsageReport -ReportCSV $SharePointReport -ReportName "getSharePointSiteUsageDetail" -Section "SharePoint"
     
-    Write-Output "[->] Calculating growth trends..."
+    Write-Host "[->] Calculating growth trends..."
     $M365Sizing.SharePoint.AverageGrowthPercent = Measure-AverageGrowth -ReportCSV $SharePointStorageReport -ReportName "getSharePointSiteUsageStorage"
     
-    Write-Output "[OK] SharePoint analysis complete"
-    Write-Output "    - Active Sites: $($M365Sizing.SharePoint.NumberOfSites)"
-    Write-Output "    - Total Storage: $($M365Sizing.SharePoint.TotalSizeGB) GB"
-    Write-Output "    - Annual Growth: $($M365Sizing.SharePoint.AverageGrowthPercent) percent`n"
+    Write-Host "[OK] SharePoint analysis complete"
+    Write-Host "    - Active Sites: $($M365Sizing.SharePoint.NumberOfSites)"
+    Write-Host "    - Total Storage: $($M365Sizing.SharePoint.TotalSizeGB) GB"
+    Write-Host "    - Annual Growth: $($M365Sizing.SharePoint.AverageGrowthPercent) percent`n"
 }
 catch {
-    Write-Output "[WARN] Warning: Could not retrieve SharePoint data - $_`n"
+    Write-Host "[WARN] Warning: Could not retrieve SharePoint data - $_`n"
 }
 
 #endregion
@@ -533,12 +558,12 @@ catch {
 #region Archive Mailbox Processing (Optional)
 
 if (-not $SkipArchiveMailbox) {
-    Write-Output "===================================================================="
-    Write-Output "  Processing Archive Mailboxes"
-    Write-Output "====================================================================`n"
+    Write-Host "===================================================================="
+    Write-Host "  Processing Archive Mailboxes"
+    Write-Host "====================================================================`n"
     
     try {
-        Write-Output "[->] Connecting to Exchange Online..."
+        Write-Host "[->] Connecting to Exchange Online..."
         
         $UserPrincipalName = (Get-MgContext).Account
         $script:UserPrincipalName = $UserPrincipalName
@@ -547,21 +572,21 @@ if (-not $SkipArchiveMailbox) {
         
         New-CleanO365Session
         
-        Write-Output "[->] Retrieving archive mailbox data..."
+        Write-Host "[->] Retrieving archive mailbox data..."
         
         if ($AzureAdRequired) {
-            $Mailboxes = Get-EXOMailbox -ResultSize Unlimited -Properties ArchiveStatus, ArchiveDatabase |
-                Where-Object { 
+            $Mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -Properties ArchiveStatus, ArchiveDatabase |
+                Where-Object {
                     $_.UserPrincipalName -in $AzureAdGroupMembersByUserPrincipalName -and
                     $_.ArchiveStatus -eq "Active"
-                }
+                })
         }
         else {
-            $Mailboxes = Get-EXOMailbox -ResultSize Unlimited -Properties ArchiveStatus, ArchiveDatabase |
-                Where-Object { $_.ArchiveStatus -eq "Active" }
+            $Mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -Properties ArchiveStatus, ArchiveDatabase |
+                Where-Object { $_.ArchiveStatus -eq "Active" })
         }
         
-        Write-Output "[->] Found $($Mailboxes.Count) archive mailboxes to process"
+        Write-Host "[->] Found $($Mailboxes.Count) archive mailboxes to process"
         
         $ArchiveStats = @{
             TotalArchives = 0
@@ -586,7 +611,7 @@ if (-not $SkipArchiveMailbox) {
                 
                 if ($processedCount % 50 -eq 0) {
                     $percentComplete = [math]::Round(($processedCount / $Mailboxes.Count) * 100)
-                    Write-Output "[->] Progress: $processedCount/$($Mailboxes.Count) ($percentComplete percent)"
+                    Write-Host "[->] Progress: $processedCount/$($Mailboxes.Count) ($percentComplete percent)"
                 }
             }
             catch {
@@ -596,9 +621,9 @@ if (-not $SkipArchiveMailbox) {
         
         $ArchiveStats.TotalSizeGB = [math]::Round($ArchiveStats.TotalSizeGB, 2)
         
-        Write-Output "[OK] Archive mailbox analysis complete"
-        Write-Output "    - Active Archives: $($ArchiveStats.TotalArchives)"
-        Write-Output "    - Total Archive Storage: $($ArchiveStats.TotalSizeGB) GB`n"
+        Write-Host "[OK] Archive mailbox analysis complete"
+        Write-Host "    - Active Archives: $($ArchiveStats.TotalArchives)"
+        Write-Host "    - Total Archive Storage: $($ArchiveStats.TotalSizeGB) GB`n"
         
         # Add to sizing object
         $M365Sizing.Exchange.ArchiveMailboxes = $ArchiveStats.TotalArchives
@@ -607,7 +632,7 @@ if (-not $SkipArchiveMailbox) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
     }
     catch {
-        Write-Output "[WARN] Warning: Archive mailbox processing failed - $_`n"
+        Write-Host "[WARN] Warning: Archive mailbox processing failed - $_`n"
     }
 }
 
@@ -615,9 +640,9 @@ if (-not $SkipArchiveMailbox) {
 
 #region HTML Report Generation
 
-Write-Output "===================================================================="
-Write-Output "  Generating HYCU Sizing Report"
-Write-Output "====================================================================`n"
+Write-Host "===================================================================="
+Write-Host "  Generating HYCU Sizing Report"
+Write-Host "====================================================================`n"
 
 $reportDate = Get-Date -Format "MMMM dd, yyyy 'at' HH:mm"
 $totalUsers = [math]::Max($M365Sizing.Exchange.NumberOfUsers, $M365Sizing.OneDrive.NumberOfUsers)
@@ -956,15 +981,15 @@ $HTML_CODE = @"
                 <div class="subtitle">Environment Sizing Assessment Report</div>
                 <div class="report-meta">
                     <div class="meta-item">
-                        <span class="meta-icon">📅</span>
+                        <span class="meta-icon">&#128197;</span>
                         <span>Generated: $reportDate</span>
                     </div>
                     <div class="meta-item">
-                        <span class="meta-icon">📊</span>
+                        <span class="meta-icon">&#128202;</span>
                         <span>Analysis Period: $Period days</span>
                     </div>
                     <div class="meta-item">
-                        <span class="meta-icon">🔧</span>
+                        <span class="meta-icon">&#128295;</span>
                         <span>Version: $Version</span>
                     </div>
                 </div>
@@ -989,26 +1014,36 @@ $HTML_CODE = @"
             
             <div class="section">
                 <div class="section-header">
-                    <div class="section-icon">📧</div>
+                    <div class="section-icon">&#128231;</div>
                     <h2 class="section-title">Exchange Online</h2>
                 </div>
                 <div class="metrics-grid">
                     <div class="metric-card">
-                        <div class="metric-label">$ExchangeHTMLTitle Count</div>
+                        <div class="metric-label">Total Mailboxes</div>
                         <div class="metric-value">$($M365Sizing.Exchange.NumberOfUsers)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Licensed Mailboxes</div>
+                        <div class="metric-value">$($M365Sizing.Exchange.LicensedMailboxes)</div>
+                        <div class="growth-badge">$($M365Sizing.Exchange.LicensedSizeGB) GB</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Unlicensed Mailboxes</div>
+                        <div class="metric-value">$($M365Sizing.Exchange.UnlicensedMailboxes)</div>
+                        <div class="growth-badge">Shared / Room / Equip. &middot; $($M365Sizing.Exchange.UnlicensedSizeGB) GB</div>
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Total Storage</div>
                         <div class="metric-value">$($M365Sizing.Exchange.TotalSizeGB)<span class="metric-unit">GB</span></div>
                     </div>
                     <div class="metric-card">
-                        <div class="metric-label">Avg per User</div>
+                        <div class="metric-label">Avg per Mailbox</div>
                         <div class="metric-value">$($M365Sizing.Exchange.SizePerUserGB)<span class="metric-unit">GB</span></div>
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Annual Growth</div>
                         <div class="metric-value">$($M365Sizing.Exchange.AverageGrowthPercent)<span class="metric-unit">%</span></div>
-                        <div class="growth-badge">📈 Year-over-Year</div>
+                        <div class="growth-badge">&#128200; Year-over-Year</div>
                     </div>
                 </div>
             </div>
@@ -1017,7 +1052,7 @@ $HTML_CODE = @"
             
             <div class="section">
                 <div class="section-header">
-                    <div class="section-icon">☁️</div>
+                    <div class="section-icon">&#9729;&#65039;</div>
                     <h2 class="section-title">OneDrive for Business</h2>
                 </div>
                 <div class="metrics-grid">
@@ -1036,7 +1071,7 @@ $HTML_CODE = @"
                     <div class="metric-card">
                         <div class="metric-label">Annual Growth</div>
                         <div class="metric-value">$($M365Sizing.OneDrive.AverageGrowthPercent)<span class="metric-unit">%</span></div>
-                        <div class="growth-badge">📈 Year-over-Year</div>
+                        <div class="growth-badge">&#128200; Year-over-Year</div>
                     </div>
                 </div>
             </div>
@@ -1045,7 +1080,7 @@ $HTML_CODE = @"
             
             <div class="section">
                 <div class="section-header">
-                    <div class="section-icon">🌐</div>
+                    <div class="section-icon">&#127760;</div>
                     <h2 class="section-title">SharePoint Online</h2>
                 </div>
                 <div class="metrics-grid">
@@ -1059,12 +1094,12 @@ $HTML_CODE = @"
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Avg per Site</div>
-                        <div class="metric-value">$($M365Sizing.SharePoint.SizePerUserGB)<span class="metric-unit">GB</span></div>
+                        <div class="metric-value">$($M365Sizing.SharePoint.SizePerSiteGB)<span class="metric-unit">GB</span></div>
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Annual Growth</div>
                         <div class="metric-value">$($M365Sizing.SharePoint.AverageGrowthPercent)<span class="metric-unit">%</span></div>
-                        <div class="growth-badge">📈 Year-over-Year</div>
+                        <div class="growth-badge">&#128200; Year-over-Year</div>
                     </div>
                 </div>
             </div>
@@ -1088,8 +1123,8 @@ $HTML_CODE = @"
     ===========================================
     
     Exchange Details:
-    - User Mailboxes: $ExchangeUserMailboxCount
-    - Shared Mailboxes: $ExchangeSharedMailboxCount
+    - Licensed (user) Mailboxes: $ExchangeLicensedCount
+    - Unlicensed (shared/room/equipment) Mailboxes: $ExchangeUnlicensedCount
     - Total: $($M365Sizing.Exchange.NumberOfUsers)
     
     Report Generated: $reportDate
@@ -1106,15 +1141,23 @@ $HTML_CODE = @"
 $reportPath = Join-Path (Get-Location) "HYCU-M365-Sizing-Report.html"
 $HTML_CODE | Out-File -FilePath $reportPath -Encoding UTF8 -Force
 
-Write-Output "[OK] Report generated successfully!"
-Write-Output "`n==================================================================="
-Write-Output "  -- Report Location"
-Write-Output "==================================================================="
-Write-Output "`n    $reportPath`n"
+Write-Host "[OK] Report generated successfully!"
+Write-Host "`n==================================================================="
+Write-Host "  -- Report Location"
+Write-Host "==================================================================="
+Write-Host "`n    $reportPath`n"
 
 #endregion
 
 #region Cleanup and Return
+
+# Disconnect from Microsoft Graph to leave no lingering session.
+try {
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+}
+catch {
+    # Ignore - no active context to disconnect.
+}
 
 if ($OutputObject) {
     return $M365Sizing

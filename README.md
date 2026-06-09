@@ -59,7 +59,7 @@ The **HYCU for Microsoft 365 Sizing Assessment Tool** is a PowerShell script tha
 
 | Workload | Metrics Collected | Filtering Support |
 |----------|-------------------|-------------------|
-| **Exchange Online** | • User & Shared mailboxes<br>• Total storage per mailbox<br>• Archive mailboxes (optional)<br>• Growth rate (180 days) | ✅ Azure AD Group |
+| **Exchange Online** | • Licensed (user) vs unlicensed (shared/room/equipment) mailboxes<br>• Total storage per mailbox<br>• Archive mailboxes (optional)<br>• Growth rate (180 days) | ✅ Azure AD Group |
 | **OneDrive** | • Active users<br>• Storage per user<br>• Total capacity<br>• Growth trends | ✅ Azure AD Group |
 | **SharePoint** | • Site collections<br>• Storage per site<br>• Total usage<br>• Growth analysis | ✅ Tenant-wide only |
 
@@ -114,8 +114,8 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/hycu-m365-sizing-tool.git
-cd hycu-m365-sizing-tool
+git clone https://github.com/cabsalon93/O365-Sizing.git
+cd O365-Sizing
 ```
 
 ### Step 2: Install Dependencies
@@ -215,6 +215,8 @@ $sizingData = .\Get-M365SizingInfo-HYCU.ps1 -OutputObject
 
 # Access specific metrics
 Write-Host "Total Exchange Storage: $($sizingData.Exchange.TotalSizeGB) GB"
+Write-Host "Licensed Mailboxes:   $($sizingData.Exchange.LicensedMailboxes)"
+Write-Host "Unlicensed Mailboxes: $($sizingData.Exchange.UnlicensedMailboxes)"
 Write-Host "OneDrive Users: $($sizingData.OneDrive.NumberOfUsers)"
 Write-Host "SharePoint Sites: $($sizingData.SharePoint.NumberOfSites)"
 ```
@@ -356,23 +358,25 @@ Enable detailed logging to diagnose issues:
 
 ### How Annual Growth is Calculated
 
-1. **Data Collection**: 180 days of historical storage data
-2. **Daily Calculation**: `(Storage_Day_N / Storage_Day_N-1 - 1) × 100`
-3. **Average**: Mean of all daily growth rates
-4. **Annualization**: `Ceiling(Average × 2)`
+The tool uses a compound (CAGR-style) projection between the first and last data
+points of the analysis period, scaled to a full year:
+
+1. **Data Collection**: up to 180 days of historical storage data (one point/day)
+2. **Endpoints**: take the first (`First`) and last (`Last`) days with usage
+3. **Day span**: `Days = number of data points − 1`
+4. **Annualization**: `AnnualGrowth% = ((Last / First) ^ (365 / Days) − 1) × 100`
 
 ### Example
 
 ```
-Day 1: 1000 GB
-Day 2: 1005 GB → Growth: 0.5%
-Day 3: 1010 GB → Growth: 0.5%
-...
-Average daily: 0.5%
-Annual projection: Ceiling(0.5% × 2) = 1% annual growth
+First day:  1000 GB
+Last day:   1100 GB   (180 days later)
+Period growth: +10% over 180 days
+Annual projection: ((1100/1000) ^ (365/180) − 1) × 100 ≈ 21% annual growth
 ```
 
-**Note**: This is a conservative estimate and may vary based on organizational patterns.
+**Note**: This is an estimate and may vary based on organizational patterns. It
+can be negative if storage shrank over the period.
 
 ---
 
@@ -401,7 +405,7 @@ We welcome contributions! Here's how you can help:
 
 ### Reporting Issues
 
-1. Check [existing issues](https://github.com/yourusername/hycu-m365-sizing-tool/issues)
+1. Check [existing issues](https://github.com/cabsalon93/O365-Sizing/issues)
 2. Create a new issue with:
    - Clear description
    - Steps to reproduce
@@ -441,8 +445,8 @@ We welcome contributions! Here's how you can help:
 ### Get Help
 
 - 📧 Email: [contact your HYCU representative]
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/hycu-m365-sizing-tool/issues)
-- 💡 Discussions: [GitHub Discussions](https://github.com/yourusername/hycu-m365-sizing-tool/discussions)
+- 🐛 Issues: [GitHub Issues](https://github.com/cabsalon93/O365-Sizing/issues)
+- 💡 Discussions: [GitHub Discussions](https://github.com/cabsalon93/O365-Sizing/discussions)
 
 ---
 
@@ -457,6 +461,16 @@ For licensing inquiries, contact your HYCU representative.
 ---
 
 ## 🔄 Changelog
+
+### Version 4.5-HYCU (June 2026)
+
+- ✨ Licensed vs unlicensed mailbox breakdown for Exchange (shared/room/equipment)
+- 🔧 Reworked annual growth into a proper compound (CAGR) projection
+- 🐛 `-OutputObject` is now a real switch and returns a clean object
+- 🐛 Fixes: single-mailbox archive runs, progress bars, OData escaping, Graph disconnect
+- 📝 Added `LICENSE`, `CHANGELOG.md`, `.gitignore`
+
+See [CHANGELOG.md](CHANGELOG.md) for full details.
 
 ### Version 4.4-HYCU (January 2026)
 
@@ -484,9 +498,9 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## 📊 Project Stats
 
-![GitHub stars](https://img.shields.io/github/stars/yourusername/hycu-m365-sizing-tool?style=social)
-![GitHub forks](https://img.shields.io/github/forks/yourusername/hycu-m365-sizing-tool?style=social)
-![GitHub watchers](https://img.shields.io/github/watchers/yourusername/hycu-m365-sizing-tool?style=social)
+![GitHub stars](https://img.shields.io/github/stars/cabsalon93/O365-Sizing?style=social)
+![GitHub forks](https://img.shields.io/github/forks/cabsalon93/O365-Sizing?style=social)
+![GitHub watchers](https://img.shields.io/github/watchers/cabsalon93/O365-Sizing?style=social)
 
 ---
 

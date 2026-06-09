@@ -1,6 +1,6 @@
 # HYCU for Microsoft 365 - Outil d'Évaluation de Dimensionnement
 
-[![Version](https://img.shields.io/badge/version-4.4--HYCU-blue.svg)](https://github.com)
+[![Version](https://img.shields.io/badge/version-4.5--HYCU-blue.svg)](https://github.com/cabsalon93/O365-Sizing)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/powershell/)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 
@@ -20,7 +20,7 @@ Cet outil PowerShell analyse votre environnement Microsoft 365 pour fournir des 
 ## ✨ Fonctionnalités
 
 ### 📊 Collecte de données
-- ✅ **Exchange Online** : Boîtes aux lettres utilisateurs et partagées
+- ✅ **Exchange Online** : Boîtes licenciées (utilisateurs) vs non-licenciées (partagées / salle / équipement)
 - ✅ **OneDrive for Business** : Stockage personnel des utilisateurs
 - ✅ **SharePoint Online** : Sites d'équipe et de communication
 - ✅ **Boîtes d'archivage** : Support optionnel (paramètre)
@@ -193,8 +193,9 @@ Le rapport `HYCU-M365-Sizing-Report.html` contient :
 - **Nombre de workloads** protégés
 
 #### 📧 Section Exchange Online
-- Nombre de boîtes aux lettres (utilisateurs/partagées)
-- Stockage total et par utilisateur
+- Nombre total de boîtes aux lettres
+- Boîtes **licenciées** (utilisateurs) vs **non-licenciées** (partagées / salle / équipement), avec stockage par catégorie
+- Stockage total et moyen par boîte
 - Taux de croissance annuelle
 
 #### ☁️ Section OneDrive for Business
@@ -220,8 +221,12 @@ Le rapport `HYCU-M365-Sizing-Report.html` contient :
 ```powershell
 @{
     Exchange = @{
-        NumberOfUsers = 1247
+        NumberOfUsers = 1247        # Total des boîtes (licenciées + non-licenciées)
+        LicensedMailboxes = 1102    # Boîtes utilisateurs (consomment une licence)
+        UnlicensedMailboxes = 145   # Boîtes partagées / salle / équipement
         TotalSizeGB = 3845.67
+        LicensedSizeGB = 3520.10
+        UnlicensedSizeGB = 325.57
         SizePerUserGB = 3.08
         AverageGrowthPercent = 18
         ArchiveMailboxes = 145      # Si -SkipArchiveMailbox $false
@@ -236,7 +241,7 @@ Le rapport `HYCU-M365-Sizing-Report.html` contient :
     SharePoint = @{
         NumberOfSites = 87
         TotalSizeGB = 1840.15
-        SizePerUserGB = 21.15
+        SizePerSiteGB = 21.15
         AverageGrowthPercent = 14
     }
 }
@@ -316,22 +321,22 @@ Cela créera un fichier `debug.log` avec tous les détails d'exécution.
 
 ### Méthodologie
 
-Le script calcule la croissance annuelle en :
+Le script calcule la croissance annuelle par projection composée (type CAGR)
+entre le premier et le dernier point de données de la période :
 
-1. **Collectant** les données de stockage sur 180 jours
-2. **Calculant** le taux de croissance quotidien moyen
-3. **Extrapolant** sur une année (x2)
-4. **Arrondissant** à l'entier supérieur pour une estimation conservative
+1. **Collecte** des données de stockage (jusqu'à 180 jours, 1 point/jour)
+2. **Extrémités** : premier (`Premier`) et dernier (`Dernier`) jour avec usage
+3. **Durée** : `Jours = nombre de points − 1`
+4. **Annualisation** : `Croissance% = ((Dernier / Premier) ^ (365 / Jours) − 1) × 100`
 
 ### Formule
 
 ```
-Croissance Quotidienne = ((Stockage_Jour_N / Stockage_Jour_N-1) - 1) × 100
-Croissance Moyenne = Moyenne(Tous les jours)
-Croissance Annuelle = Plafond(Croissance Moyenne × 2)
+Croissance Annuelle = ((Dernier / Premier) ^ (365 / Jours) - 1) × 100
 ```
 
-**Note** : Cette estimation est conservative et peut varier selon les habitudes d'utilisation.
+**Note** : Cette estimation peut varier selon les habitudes d'utilisation et
+peut être négative si le stockage a diminué sur la période.
 
 ---
 
@@ -370,6 +375,13 @@ Croissance Annuelle = Plafond(Croissance Moyenne × 2)
 ---
 
 ## 🔄 Changelog
+
+### Version 4.5-HYCU (Juin 2026)
+- ✨ Distinction boîtes licenciées (utilisateurs) / non-licenciées (partagées, salle, équipement)
+- 🔧 Calcul de croissance revu en projection composée (CAGR)
+- 🐛 `-OutputObject` devient un vrai switch et retourne un objet propre
+- 🐛 Corrections : archives à 1 boîte, barres de progression, échappement OData, déconnexion Graph
+- 📝 Ajout de `LICENSE`, `CHANGELOG.md`, `.gitignore`
 
 ### Version 4.4-HYCU (Janvier 2026)
 - ✨ Nouvelle interface HTML moderne inspirée de HYCU.com

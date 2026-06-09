@@ -1,0 +1,27 @@
+HYCU for Microsoft 365 - Sizing Assessment Tool
+Proprietary Software License
+
+Copyright (c) 2026 HYCU, Inc. All rights reserved.
+
+This software and its accompanying documentation (the "Software") are the
+proprietary and confidential property of HYCU, Inc. The Software is provided
+as part of HYCU professional services for the sole purpose of assessing a
+Microsoft 365 environment for HYCU backup sizing.
+
+Subject to the terms below, HYCU, Inc. grants the recipient a non-exclusive,
+non-transferable, revocable license to use the Software internally to perform
+sizing assessments of their own Microsoft 365 tenant(s).
+
+You may NOT, without prior written consent from HYCU, Inc.:
+  - Sell, sublicense, rent, lease, or otherwise distribute the Software;
+  - Remove or alter any copyright, trademark, or other proprietary notices;
+  - Use the Software to provide commercial services to third parties.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+HYCU, INC. BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+For licensing inquiries, contact your HYCU representative or visit https://hycu.com.
